@@ -9,9 +9,9 @@ from threading import Thread
 # CONFIG
 # ============================
 
-TELEGRAM_TOKEN = "8772925806:AAHc6eK2tLm4AfmL63RlHnAUlmDpZB1hjW8"
-METEOBLUE_KEY = "ewCtvPsQ3DuiHq9N"
-STORMGLASS_KEY = "41beea66-59ad-11f1-8721-0242ac120004-41beebc4-59ad-11f1-8721-0242ac120004"
+TELEGRAM_TOKEN = ""
+METEOBLUE_KEY = ""
+STORMGLASS_KEY = ""
 
 # storage utenti + cache
 user_data_store = {}
