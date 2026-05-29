@@ -81,13 +81,25 @@ def fase_lunare():
 # ============================
 
 def get_weather(lat, lon):
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lat}&longitude={lon}"
-        f"&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m"
-    )
-    r = requests.get(url, timeout=3)
-    return r.json()["hourly"]
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast?"
+            f"latitude={lat}&longitude={lon}"
+            "&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m"
+        )
+
+        r = requests.get(url, timeout=3)
+        data = r.json()
+
+        if "hourly" not in data:
+            logging.warning("Weather: risposta senza hourly")
+            return None
+
+        return data["hourly"]
+
+    except Exception as e:
+        logging.error(f"Weather error: {e}")
+        return None
 
 # ============================
 # ONDE (SG FIRST)
