@@ -4,8 +4,9 @@ import os
 import logging
 from datetime import datetime
 from math import floor
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from telegram import ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.constants import ParseMode
 from threading import Thread
 
 # ============================
@@ -246,17 +247,17 @@ def genera_report(lat, lon):
     return report
 
 # ============================
-# TELEGRAM
+# TELEGRAM HANDLERS
 # ============================
 
-def start(update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("📍 Posizione", request_location=True)]]
-    update.message.reply_text(
+    await update.message.reply_text(
         "Invia posizione",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-def pos(update, context):
+async def pos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     loc = update.message.location
 
@@ -265,27 +266,27 @@ def pos(update, context):
 
     user_data_store[chat_id] = (lat, lon)
 
-    update.message.reply_text("✅ Posizione salvata")
-    update.message.reply_text(genera_report(lat, lon))
+    await update.message.reply_text("✅ Posizione salvata")
+    await update.message.reply_text(genera_report(lat, lon))
 
-def meteo(update, context):
+async def meteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
 
     if chat_id in user_data_store:
         lat, lon = user_data_store[chat_id]
-        update.message.reply_text(genera_report(lat, lon))
+        await update.message.reply_text(genera_report(lat, lon))
     else:
-        update.message.reply_text("Invia prima la posizione")
+        await update.message.reply_text("Invia prima la posizione")
 
 # ============================
 # ALERT LOOP
 # ============================
 
-def alert_loop(bot):
+async def alert_loop(app: Application):
     while True:
         try:
             for uid, (lat, lon) in user_data_store.items():
-                bot.send_message(chat_id=uid, text=genera_report(lat, lon))
+                await app.bot.send_message(chat_id=uid, text=genera_report(lat, lon))
             time.sleep(3600)
         except Exception as e:
             logger.error(f"Errore in alert_loop: {e}")
@@ -296,18 +297,17 @@ def alert_loop(bot):
 # ============================
 
 def main():
-    updater = Updater(TELEGRAM_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.location, pos))
-    dp.add_handler(CommandHandler("meteo", meteo))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.LOCATION, pos))
+    app.add_handler(CommandHandler("meteo", meteo))
 
     # thread alert
-    Thread(target=alert_loop, args=(updater.bot,), daemon=True).start()
+    Thread(target=lambda: asyncio.run(alert_loop(app)), daemon=True).start()
 
-    updater.start_polling()
-    updater.idle()
+    app.run_polling()
 
 if __name__ == "__main__":
+    import asyncio
     main()
