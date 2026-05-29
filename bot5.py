@@ -165,7 +165,7 @@ def vento_adriatico(wind, dir):
     return "🌬 Locale"
 
 # ============================
-# BONUS FINESTRA USCITA
+# FINESTRA USCITA
 # ============================
 
 def best_time_window(forecast):
@@ -279,16 +279,16 @@ def meteo(update, context):
 # ============================
 # ALERT LOOP
 # ============================
-
-def alert_loop(bot):
-    while True:
-        try:
-            for uid, (lat, lon) in user_data_store.items():
-                bot.send_message(chat_id=uid, text=genera_report(lat, lon))
-            time.sleep(3600)
-        except:
-            time.sleep(60)
-
+#
+#def alert_loop(bot):
+ #   while True:
+  #      try:
+  #          for uid, (lat, lon) in #user_data_store.items():
+   #             #bot.send_message(chat_id=uid, #text=genera_report(lat, lon))
+  #          time.sleep(3600)
+   #     except:
+     #       time.sleep(60)
+#
 # ============================
 # MAIN
 # ============================
