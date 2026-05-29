@@ -24,6 +24,7 @@ CACHE_WAVE_TTL = 900
 CACHE_TIDE_TTL = 1800
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ============================
 # UTILS
@@ -281,12 +282,13 @@ def meteo(update, context):
 # ============================
 
 def alert_loop(bot):
-   while True:
+    while True:
         try:
             for uid, (lat, lon) in user_data_store.items():
-               bot.send_message(chat_id=uid, text=genera_report(lat, lon))
-           time.sleep(3600)
-       except:
+                bot.send_message(chat_id=uid, text=genera_report(lat, lon))
+            time.sleep(3600)
+        except Exception as e:
+            logger.error(f"Errore in alert_loop: {e}")
             time.sleep(60)
 
 # ============================
