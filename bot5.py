@@ -7,7 +7,6 @@ from math import floor
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.constants import ParseMode
-from threading import Thread
 
 # ============================
 # CONFIG
@@ -125,7 +124,7 @@ def moon_phase():
     return phases[index]
 
 # ============================
-# ONDE (mock semplice, non rimosso)
+# ONDE (mock semplice)
 # ============================
 
 def get_waves(lat, lon):
@@ -253,7 +252,7 @@ def genera_report(lat, lon):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("📍 Posizione", request_location=True)]]
     await update.message.reply_text(
-        "Invia posizione",
+        "Invia la tua posizione per ricevere il report meteo",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
@@ -276,21 +275,7 @@ async def meteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lat, lon = user_data_store[chat_id]
         await update.message.reply_text(genera_report(lat, lon))
     else:
-        await update.message.reply_text("Invia prima la posizione")
-
-# ============================
-# ALERT LOOP
-# ============================
-
-async def alert_loop(app: Application):
-    while True:
-        try:
-            for uid, (lat, lon) in user_data_store.items():
-                await app.bot.send_message(chat_id=uid, text=genera_report(lat, lon))
-            time.sleep(3600)
-        except Exception as e:
-            logger.error(f"Errore in alert_loop: {e}")
-            time.sleep(60)
+        await update.message.reply_text("Invia prima la posizione con /start")
 
 # ============================
 # MAIN
@@ -303,11 +288,7 @@ def main():
     app.add_handler(MessageHandler(filters.LOCATION, pos))
     app.add_handler(CommandHandler("meteo", meteo))
 
-    # thread alert
-    Thread(target=lambda: asyncio.run(alert_loop(app)), daemon=True).start()
-
     app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
     main()
