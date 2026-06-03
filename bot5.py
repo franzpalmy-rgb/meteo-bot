@@ -1,6 +1,5 @@
 import requests
 import os
-import logging
 from datetime import datetime
 from math import floor
 
@@ -12,12 +11,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # ============================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+
+WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
+MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 
 last_location = None
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # ============================
 # UTILS
@@ -32,7 +30,28 @@ def direzione(gradi):
     return dirs[int((gradi + 11.25)/22.5) % 16]
 
 # ============================
-# METEO DECODE
+# AREA ADRIATICO
+# ============================
+
+def is_adriatic(lat, lon):
+    return 40.0 <= lat <= 46.5 and 12.0 <= lon <= 20.0
+
+# ============================
+# VENTO ADRIATICO
+# ============================
+
+def vento_adriatico(gradi):
+    d = direzione(gradi)
+
+    if d in ["NE", "NNE", "ENE"]:
+        return "💨 Bora"
+    elif d in ["SE", "SSE", "ESE"]:
+        return "🌊 Scirocco"
+    else:
+        return "🌬 Vento locale"
+
+# ============================
+# METEO
 # ============================
 
 def meteo_code(code):
@@ -49,10 +68,6 @@ def meteo_code(code):
     }
     return mapping.get(code, ("⛅", "Variabile"))
 
-# ============================
-# METEO
-# ============================
-
 def get_weather(lat, lon):
     params = {
         "latitude": lat,
@@ -62,13 +77,60 @@ def get_weather(lat, lon):
         "timezone": "auto"
     }
 
-    r = requests.get(OPEN_METEO_URL, params=params)
+    r = requests.get(WEATHER_URL, params=params)
     data = r.json()
 
     return data["current_weather"], data["hourly"]
 
 # ============================
-# FASI LUNARI
+# MARINE (ONDE REALI)
+# ============================
+
+def get_marine(lat, lon):
+    if not is_adriatic(lat, lon):
+        return None, None, None
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "wave_height,wave_period,wave_direction",
+        "timezone": "auto"
+    }
+
+    r = requests.get(MARINE_URL, params=params)
+    data = r.json()
+
+    try:
+        h = data["hourly"]["wave_height"][0]
+        p = data["hourly"]["wave_period"][0]
+        d = data["hourly"]["wave_direction"][0]
+        return h, p, d
+    except:
+        return None, None, None
+
+# ============================
+# STATO MARE (ADRIATICO)
+# ============================
+
+def sea_state_index(height, period):
+    if not height or not period:
+        return None
+    return round(height / period, 2)
+
+def sea_state_label(index):
+    if index is None:
+        return "n.d."
+    if index < 0.08:
+        return "🟢 Lungo"
+    elif index < 0.15:
+        return "🟡 Buono"
+    elif index < 0.25:
+        return "🟠 Corto"
+    else:
+        return "🔴 Molto mosso"
+
+# ============================
+# FASE LUNARE
 # ============================
 
 def moon_phase():
@@ -93,7 +155,7 @@ def moon_phase():
     return phases[index]
 
 # ============================
-# FORECAST (con descrizione + raffiche)
+# FORECAST
 # ============================
 
 def format_forecast(hourly):
@@ -102,7 +164,7 @@ def format_forecast(hourly):
     times = hourly["time"][:12]
     winds = hourly["windspeed_10m"][:12]
     gusts = hourly["windgusts_10m"][:12]
-    directions = hourly["winddirection_10m"][:12]
+    dirs = hourly["winddirection_10m"][:12]
     codes = hourly["weathercode"][:12]
 
     for i in range(len(times)):
@@ -113,7 +175,7 @@ def format_forecast(hourly):
             f"{ora} → {icona} {desc}\n"
             f"   🌬 {kmh_to_kn(winds[i])} kn "
             f"(raff. {kmh_to_kn(gusts[i])} kn) "
-            f"da {direzione(directions[i])}"
+            f"da {direzione(dirs[i])}"
         )
 
     return "\n".join(out)
@@ -125,15 +187,37 @@ def format_forecast(hourly):
 def genera_report(lat, lon):
     current, hourly = get_weather(lat, lon)
 
+    wave_h, wave_p, wave_dir = get_marine(lat, lon)
+
     wind = current["windspeed"]
     wind_dir = current["winddirection"]
+
+    vento_tipo = vento_adriatico(wind_dir)
+
+    # ONDE
+    if wave_h is not None:
+        idx = sea_state_index(wave_h, wave_p)
+
+        onde_txt = f"""
+🌊 ONDE (Adriatico)
+Altezza: {wave_h:.2f} m
+Periodo: {wave_p:.1f} s
+Direzione: {direzione(wave_dir)}
+
+📊 STATO DEL MARE
+{sea_state_label(idx)}
+"""
+    else:
+        onde_txt = "\n🌊 ONDE: non disponibili (fuori Adriatico)\n"
 
     return f"""
 📅 {datetime.now().strftime('%d %B %Y')}
 
 📍 METEO GENERALE
 🌬️ Vento: {kmh_to_kn(wind)} kn da {direzione(wind_dir)}
+📌 {vento_tipo}
 🌙 Fase lunare: {moon_phase()}
+{onde_txt}
 
 🕒 FORECAST 12H
 {format_forecast(hourly)}
@@ -147,7 +231,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("📍 Posizione", request_location=True)]]
 
     await update.message.reply_text(
-        "Invia la tua posizione 📍",
+        "Invia la posizione 📍",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
