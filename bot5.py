@@ -1,27 +1,20 @@
 import requests
-import time
 import os
 import logging
 from datetime import datetime
 from math import floor
+
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from telegram.constants import ParseMode
 
 # ============================
 # CONFIG
 # ============================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
-user_data_store = {}
-weather_cache = {}
-wave_cache = {}
-tide_cache = {}
-
-CACHE_WEATHER_TTL = 600
-CACHE_WAVE_TTL = 900
-CACHE_TIDE_TTL = 1800
+last_location = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,7 +32,7 @@ def direzione(gradi):
     return dirs[int((gradi + 11.25)/22.5) % 16]
 
 # ============================
-# METEO DECODE (ICONA + TESTO)
+# METEO DECODE
 # ============================
 
 def meteo_code(code):
@@ -57,46 +50,22 @@ def meteo_code(code):
     return mapping.get(code, ("⛅", "Variabile"))
 
 # ============================
-# METEO (Open-Meteo)
+# METEO
 # ============================
 
 def get_weather(lat, lon):
-    key = (round(lat,2), round(lon,2))
-    now = time.time()
-
-    if key in weather_cache:
-        if now - weather_cache[key]["time"] < CACHE_WEATHER_TTL:
-            return weather_cache[key]["data"]
-
-    url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
         "longitude": lon,
         "current_weather": True,
-        "hourly": "windspeed_10m,winddirection_10m,weathercode",
+        "hourly": "windspeed_10m,windgusts_10m,winddirection_10m,weathercode",
         "timezone": "auto"
     }
 
-    res = requests.get(url, params=params).json()
+    r = requests.get(OPEN_METEO_URL, params=params)
+    data = r.json()
 
-    current = res["current_weather"]
-    hourly = res["hourly"]
-
-    forecast = []
-    for i in range(12):
-        forecast.append({
-            "wind": hourly["windspeed_10m"][i],
-            "dir": hourly["winddirection_10m"][i],
-            "code": hourly["weathercode"][i]
-        })
-
-    result = {
-        "current": current,
-        "forecast": forecast
-    }
-
-    weather_cache[key] = {"time": now, "data": result}
-    return result
+    return data["current_weather"], data["hourly"]
 
 # ============================
 # FASI LUNARI
@@ -112,85 +81,39 @@ def moon_phase():
 
     phases = [
         "🌑 Luna nuova",
-        "🌒 Falce crescente",
+        "🌒 Crescente",
         "🌓 Primo quarto",
-        "🌔 Gibbosa crescente",
-        "🌕 Luna piena",
-        "🌖 Gibbosa calante",
+        "🌔 Gibosa crescente",
+        "🌕 Piena",
+        "🌖 Gibosa calante",
         "🌗 Ultimo quarto",
-        "🌘 Falce calante"
+        "🌘 Calante"
     ]
 
     return phases[index]
 
 # ============================
-# ONDE (mock semplice)
+# FORECAST (con descrizione + raffiche)
 # ============================
 
-def get_waves(lat, lon):
-    return {
-        "height": 0.8,
-        "period": 5
-    }
-
-# ============================
-# MAREE (mock semplice)
-# ============================
-
-def get_tide(lat, lon):
-    return ["08:10 ↑", "14:20 ↓"]
-
-def format_tides(t):
-    return "\n".join(t) if t else "n.d."
-
-# ============================
-# ADRIATIC LOGIC
-# ============================
-
-def sea_state_index(w):
-    if not w: return None
-    return round(w["height"] / w["period"], 2)
-
-def sea_state_label(i):
-    if i is None: return "n.d."
-    if i < 0.1: return "🟢 Lungo"
-    elif i < 0.2: return "🟡 Buono"
-    elif i < 0.3: return "🟠 Corto"
-    else: return "🔴 Duro"
-
-def vento_adriatico(wind, dir):
-    if dir in ["NE","NNE","ENE"]:
-        return "💨 Bora"
-    if dir in ["SE","SSE","ESE"]:
-        return "🌊 Scirocco"
-    return "🌬 Locale"
-
-# ============================
-# FINESTRA USCITA
-# ============================
-
-def best_time_window(forecast):
-    best = []
-    for i, f in enumerate(forecast):
-        if f["wind"] < 15:
-            best.append(str(i))
-    return ", ".join(best) if best else "n.d."
-
-# ============================
-# FORECAST
-# ============================
-
-def format_forecast(forecast):
+def format_forecast(hourly):
     out = []
-    base_hour = datetime.utcnow().hour
 
-    for i, f in enumerate(forecast):
-        hour = (base_hour + i) % 24
-        icon, _ = meteo_code(f["code"])
+    times = hourly["time"][:12]
+    winds = hourly["windspeed_10m"][:12]
+    gusts = hourly["windgusts_10m"][:12]
+    directions = hourly["winddirection_10m"][:12]
+    codes = hourly["weathercode"][:12]
+
+    for i in range(len(times)):
+        ora = times[i].split("T")[1]
+        icona, desc = meteo_code(codes[i])
 
         out.append(
-            f"{hour:02d}:00 "
-            f"{kmh_to_kn(f['wind'])}kn {direzione(f['dir'])} {icon}"
+            f"{ora} → {icona} {desc}\n"
+            f"   🌬 {kmh_to_kn(winds[i])} kn "
+            f"(raff. {kmh_to_kn(gusts[i])} kn) "
+            f"da {direzione(directions[i])}"
         )
 
     return "\n".join(out)
@@ -200,82 +123,52 @@ def format_forecast(forecast):
 # ============================
 
 def genera_report(lat, lon):
-
-    weather = get_weather(lat, lon)
-    current = weather["current"]
-    forecast = weather["forecast"]
-
-    wave = get_waves(lat, lon)
-    tides = get_tide(lat, lon)
+    current, hourly = get_weather(lat, lon)
 
     wind = current["windspeed"]
-    dir_deg = current["winddirection"]
-    code = current["weathercode"]
+    wind_dir = current["winddirection"]
 
-    icon, desc = meteo_code(code)
-    dir_txt = direzione(dir_deg)
-
-    idx = sea_state_index(wave)
-
-    report = f"""
+    return f"""
 📅 {datetime.now().strftime('%d %B %Y')}
 
-📍 METEO GENERALE: {icon} {desc}
-
-🌬️ {kmh_to_kn(wind)} kn da {dir_txt}
-📌 {vento_adriatico(wind, dir_txt)}
-
+📍 METEO GENERALE
+🌬️ Vento: {kmh_to_kn(wind)} kn da {direzione(wind_dir)}
 🌙 Fase lunare: {moon_phase()}
 
-🌊 ONDE
-{wave['height']} m / {wave['period']} s
-
-📊 Mare: {sea_state_label(idx)}
-
-🌊 MAREA
-{format_tides(tides)}
-
-✅ CONDIZIONI
-
-🧭 USCITA CONSIGLIATA: {best_time_window(forecast)}
-
 🕒 FORECAST 12H
-{format_forecast(forecast)}
+{format_forecast(hourly)}
 """
 
-    return report
-
 # ============================
-# TELEGRAM HANDLERS
+# TELEGRAM
 # ============================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("📍 Posizione", request_location=True)]]
+
     await update.message.reply_text(
-        "Invia la tua posizione per ricevere il report meteo",
+        "Invia la tua posizione 📍",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
 async def pos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
+    global last_location
+
     loc = update.message.location
+    last_location = (loc.latitude, loc.longitude)
 
-    lat = loc.latitude
-    lon = loc.longitude
-
-    user_data_store[chat_id] = (lat, lon)
-
-    await update.message.reply_text("✅ Posizione salvata")
-    await update.message.reply_text(genera_report(lat, lon))
+    report = genera_report(loc.latitude, loc.longitude)
+    await update.message.reply_text(report)
 
 async def meteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
+    if not last_location:
+        await update.message.reply_text("Invia prima la posizione.")
+        return
 
-    if chat_id in user_data_store:
-        lat, lon = user_data_store[chat_id]
-        await update.message.reply_text(genera_report(lat, lon))
-    else:
-        await update.message.reply_text("Invia prima la posizione con /start")
+    lat, lon = last_location
+    report = genera_report(lat, lon)
+
+    await update.message.reply_text(report)
 
 # ============================
 # MAIN
@@ -285,8 +178,8 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.LOCATION, pos))
     app.add_handler(CommandHandler("meteo", meteo))
+    app.add_handler(MessageHandler(filters.LOCATION, pos))
 
     app.run_polling()
 
