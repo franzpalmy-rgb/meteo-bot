@@ -158,25 +158,38 @@ def moon_phase():
 # FORECAST
 # ============================
 
-def format_forecast(hourly):
+
+ef format_forecast(hourly):
     out = []
 
-    times = hourly["time"][:12]
-    winds = hourly["windspeed_10m"][:12]
-    gusts = hourly["windgusts_10m"][:12]
-    dirs = hourly["winddirection_10m"][:12]
-    codes = hourly["weathercode"][:12]
+    times = hourly["time"]
+    winds = hourly["windspeed_10m"]
+    gusts = hourly["windgusts_10m"]
+    dirs = hourly["winddirection_10m"]
+    codes = hourly["weathercode"]
 
-    for i in range(len(times)):
-        ora = times[i].split("T")[1]
-        icona, desc = meteo_code(codes[i])
+    # ora attuale
+    now = datetime.now()
 
-        out.append(
-            f"{ora} → {icona} {desc}\n"
-            f"   🌬 {kmh_to_kn(winds[i])} kn "
-            f"(raff. {kmh_to_kn(gusts[i])} kn) "
-            f"da {direzione(dirs[i])}"
-        )
+    # trova indice della prima ora >= now
+    start_idx = 0
+    for i, t in enumerate(times):
+        t_dt = datetime.fromisoformat(t)
+        if t_dt >= now:
+            start_idx = i
+            break
+
+    # prendi le 12 ore successive da lì
+    for i in range(start_idx, min(start_idx + 12, len(times))):
+        t_dt = datetime.fromisoformat(times[i])
+        ora = t_dt.strftime("%H:%M")
+
+        vento = kmh_to_kn(winds[i])
+        raffica = kmh_to_kn(gusts[i])
+        dir_vento = direzione(dirs[i])
+        icon, desc = meteo_code(codes[i])
+
+        out.append(f"{ora} {icon} {vento}kn ({raffica}) {dir_vento}")
 
     return "\n".join(out)
 
