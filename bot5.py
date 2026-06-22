@@ -159,7 +159,7 @@ def moon_phase():
 # ============================
 
 
-ef format_forecast(hourly):
+def format_forecast(hourly):
     out = []
 
     times = hourly["time"]
